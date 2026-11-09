@@ -1,0 +1,8 @@
+syntax = "proto2";
+package legacy;
+message Packet {
+  required int32 id = 1;
+  optional string name = 2 [default = "old device"];
+  extensions 100 to 199;
+}
+extend Packet { optional string note = 100; }

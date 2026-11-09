@@ -1,0 +1,29 @@
+syntax = "proto3";
+package demo;
+import "common/types.proto";
+import "google/protobuf/timestamp.proto";
+message Packet {
+  enum State { UNKNOWN = 0; READY = 1; }
+  sint32 delta = 1;
+  sint64 signed_64 = 2;
+  uint64 unsigned_64 = 3;
+  fixed32 count = 4;
+  sfixed32 minus = 5;
+  fixed64 big = 6;
+  sfixed64 negative = 7;
+  float ratio = 8;
+  double precise = 9;
+  string title = 10 [json_name = "customTitle"];
+  bool enabled = 11;
+  State state = 12;
+  repeated sint32 samples = 13 [packed = true];
+  map<string, int64> readings = 14;
+  demo.common.Detail detail = 15;
+  oneof choice { string text = 16; int32 code = 17; }
+  bytes raw = 18;
+  google.protobuf.Timestamp created = 19;
+  optional int32 maybe = 20;
+  message Inner { int32 value = 1; }
+  Inner inner = 21;
+}
+message Node { Node child = 1; int32 value = 2; }

@@ -1,0 +1,8 @@
+<RCC><qresource prefix="/icons">
+<file alias="down.svg">assets/chevron-down.svg</file>
+<file alias="up.svg">assets/chevron-up.svg</file>
+<file alias="check.svg">assets/check.svg</file>
+<file alias="app.svg">assets/easyserial.svg</file>
+</qresource><qresource prefix="/protocols">
+<file alias="TaskBatch.proto">protocols/TaskBatch.proto</file>
+</qresource></RCC>

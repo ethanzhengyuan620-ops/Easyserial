@@ -1,0 +1,130 @@
+syntax = "proto3";
+
+option java_package = "com.hoymiles.fep.gene";
+
+// 批量任务 南向
+// 1.新增任务：批量任务优先级高于正在执行的其他命令，如果用户1点点击了手动升级，1点15分时有批量任务,此时升级还未完成,优先执行批量任务
+//   同一个batch_id有可能包含多包数据帧，当同一个批量任务
+// 2.修改任务：批量任务采用覆盖方式，新批量任务到达时，如果设备已经有批量任务，清除原有批量任务，执行新的批量任务
+// 3.取消任务：如果子任务ts为空数组,batch_id>0，表示取消该批量任务，如果取消成功，事件帧需要回复批量任务取消
+// 4.查询任务：如果batch_id=0 表示查询设备当前的批量任务列表，设备收到此命令后，回复TaskBatchReqDTO确认消息，然后通过事件帧回复TaskBatchQueryDTO
+// 5.添加任务：如果批量任务batch_id不变，表示添加任务，就是原有任务不覆盖，只判断是否有新任务
+// s->c
+message TaskBatchResDTO
+{
+  uint32 time                = 1;                        // 时间戳(秒)
+  int64 batch_id             = 2;                        // 批次编号(唯一编号) 0表示查询当前批量任务列表
+  int32 ap                   = 3;                        // 总包数量
+  int32 cp                   = 4;                        // 当前包序
+  repeated TaskResMO ts      = 5;                        // 子任务项 最多10个任务 不传表示取消当前批量任务
+}
+
+// 批量任务 收到回复
+// c->s
+message TaskBatchReqDTO
+{
+  int64 batch_id              = 1;                        // 批次编号(唯一编号,查询命令时,返回0)
+  uint32 time                 = 2;                        // 时间戳(秒)
+  int32 err_code              = 3;                        // 正确为0,其它为错误代码
+  int32 cp                    = 4;                        // 当前包序
+}
+
+// 子任务 南向
+// 1.任务分类：0.默认任务 1.一次性任务 2.周期任务
+//   优先级：一次性任务>周期任务>默认任务
+// 2.默认任务(type=0): 调度schedule的值cron=0;
+//   如果当前时间没有其他任务执行时，就执行默认任务
+// 3.一次性任务(type=1): 调度schedule的值once (st必须小于et且间隔大于15min);
+//  执行开始时间小于当前时间且结束时间大于当前时间，则立即执行该任务
+//  一次性任务的st-et都不重叠，即如果有每天2点15-4点15的任务了，不能出现3点15-5点15的任务
+// 4.周期任务(type=2): 调度schedule的值cron>0
+//    高位表月(值范围：1-12) 中高位表日(值范围：1-31) 中低位表小时+1(值范围：1-25) 低位表分钟(值范围：0-60) （最小周期分钟级）;
+//    有值就有此周期(如当月=0 日位1 则表示每月1号执行) ,如 小时为0时,表示每小时多少分都执行 (如当start=0表示每小时第0分钟执行一次)
+//    周期任务执行优先级低于一次性任务，即如果周期任务正在执行中，收到一次性任务时，先放弃周期任务执行一次性任务
+// 5.sts接收任务是都是0,只有事件帧回复查询时(TaskBatchQueryReqDTO)不应该为0,不需要回复执行完成、超时、和取消的任务(事件帧状态里面有回复)
+// 6.如果当任务的data大于1024字节，则需要分包发送;设备接收时需要把相同的task_id的data进行拼接，拼接顺序按照自然顺序就好
+// 7.当设备支持批量任务，但是不支持子任务action，应该立即回复批量任务TaskBatchReqDTO err_code=50004(暂不支持该功能)
+// s->c
+message TaskResMO
+{
+  int64 task_id                = 1;              // 任务编号(唯一编号)
+  int32 type                   = 2;              // 任务类型 (0:默认任务 1:一次性任务;2:周期性任务)
+  int32 label                  = 3;              // 命令类型 (1:任务 2:配置)
+  int32 action                 = 4;              // 任务tag 或者配置tag
+  oneof schedule {                               // 调度 默认任务填写cron=0
+    CronScheduleList cron_list      = 5;              // 周期性任务,支持多个周期，times=-1表示无限，最多12个
+    OnceScheduleList once_list      = 6 ;             // 一次性任务时间(绝对时间戳) 可以支持多个时间点，最多12个
+  }
+  bytes data                   = 7;              // 任务内容(长度2byte+数据)
+  int32 sts                    = 8;              // 任务状态(0:初始化[默认];1:执行中;2:等待执行;)
+}
+
+message CronScheduleList {
+  repeated CronSchedule cron = 1;                       // 周期任务时间
+}
+
+//一次性任务传递的调度
+message CronSchedule {
+  int32 cron  = 1;                 // 周期任务时间（位域压缩: Month:(24-31)bit | Day:(16-23)bit | Hour:(8-15)bit | Min:(0-7)bit）
+  int32 times = 2;                 // 执行次数 times=-1(0xFFFFFFFF) 表示无限执行
+}
+
+message OnceScheduleList {
+  repeated OnceSchedule items = 1;                       // 一次性任务时间列表
+}
+//一次性任务传递的调度
+message OnceSchedule {
+  int64 st = 1;                // 开始时间(秒)
+  int64 et = 2;                // 结束时间(秒)
+}
+
+// 事件帧上报任务执行状态
+// 1.事件帧evtType 位bit9=1 表示回复批量任务
+// 2.因为任务不重叠，一次事件帧只可能有一个任务的回复
+// 3.task_id如果=0，表示整个批量任务的状态，不指具体子任务,【如果全部是一次性任务，当全部执行完成后需要回复批量任务完成或者失败,不需要回复执行中】
+// 4.结果可以锁多个 同时包含一个sn的失败状态 一个sn的进度
+// s->c
+message TaskStatusEventMO
+{
+  int64 batch_id                  = 1;                                    // 批次编号(唯一编号)
+  int64 task_id                   = 2;                                    // 任务编号(唯一编号)
+  uint32 time                     = 3;                                    // 时间戳(秒)
+  int32 sts                       = 4;                                    // 执行结果状态(0:完成;1:失败;2:执行中;3:超时;4:取消,5:等待)
+  int32 err_code                  = 5;                                    // 错误原因，总的原因
+  repeated ResultDetailMO details = 6;                                    // 结果
+  int32 seq                       = 7;                                    // 当前任务执行多少次 循环任务累加就行
+}
+
+message ResultDetailMO {
+  oneof result {
+    OperatingMO operating     = 1;                                    //运行进度
+    StatusMO status           = 2;                                    //运行状态
+  }
+}
+
+message OperatingMO
+{
+  int64 sn                            = 1;                       // SN
+  int32 rate                          = 2;                       // 进度
+}
+
+message StatusMO
+{
+  int64 sn                            = 1;                       // SN
+  int32 code                          = 2;                       // 错误码 0表示成功 大于0表示失败
+}
+// 设备回复当前批量任务列表
+// 1.如果单次任务执行完成后，不需要添加到ts中
+// 2.事件帧evtType 位bit10=1 表示回复查询批量任务
+// 3.一个事件帧只能包含一个TaskBatchQueryEventMO，但是可以有多个TaskResMO，根据包大小决定
+// 4.没有批量任务也需要回复
+// 5.任务状态只有执行中和待执行，初始化状态不应该在此回复
+// s->c
+message TaskBatchQueryEventMO
+{
+  uint32 time                = 1;                        // 时间戳(秒)
+  int64 batch_id             = 2;                        // 批次编号(唯一编号)
+  int32 ap                   = 3;                        // 总包数量
+  int32 cp                   = 4;                        // 当前包序
+  repeated TaskResMO ts      = 5;                        // 子任务项 最多10个任务
+}
