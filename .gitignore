@@ -1,0 +1,18 @@
+# Local settings and generated Python files
+/config.json
+__pycache__/
+*.py[cod]
+
+# Build and packaging output
+/build/
+/dist/
+/EasySerialCpp/build/
+/EasySerialCpp/dist/
+
+# Local editor and agent state
+.vs/
+.idea/
+.agents/
+.codex/
+*.user
+*.suo
